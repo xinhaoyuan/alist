@@ -1,0 +1,3 @@
+Element = String | AList
+AList = "[" {[,] Element | String = Element} "]"
+String = Literal | QuotedString | MultiLineString
