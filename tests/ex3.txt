@@ -1,0 +1,15 @@
+[
+# a tail space after =
+foo = 
+bar
+# number as index
+1=2
+# tail space after [
+one = [ 
+two = three
+]
+# tail space after [
+another = [ 
+ a b c
+]
+]

@@ -30,7 +30,7 @@ int main() {
             }
         }
 
-        if (succ) break;
+        if (!succ) break;
         ++line_num;
     }
 

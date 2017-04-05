@@ -1,0 +1,10 @@
+[
+  empty = null
+  foo = bar
+  answer = 42
+  good = true
+  bad = false
+  float = 0.314e1
+  escaped = "\t\xe4\xb8\xad\xe6\x96\x87\xe5\xad\x97\u5b571234\n"
+  list = [ bar 42 true false 1234.5e10 ]
+]
