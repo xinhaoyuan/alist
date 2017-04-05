@@ -9,13 +9,13 @@ using namespace std;
 
 const string _emptyString;
 const list<const IData *> _emptyList;
-const map<string, const IData *> _emptyMap;
+const list<pair<string, const IData *>> _emptyKVList;
 
 class DataImpl : public IData {
     Type _type;
     string * _str;
     list<const IData *> * _list;
-    map<string, const IData *> * _map;
+    list<pair<string, const IData *>> * _kvList;
 
     friend class AListParser;
 
@@ -24,7 +24,7 @@ public:
         : _type(T_UNKNOWN)
         , _str(nullptr)
         , _list(nullptr)
-        , _map(nullptr)
+        , _kvList(nullptr)
         { }
 
     Type GetType() const override {
@@ -41,9 +41,9 @@ public:
         else return _emptyList;
     }
 
-    const map<string, const IData *> & GetDict() const override {
-        if (_map) return *_map;
-        else return _emptyMap;
+    const list<pair<string, const IData *>> & GetKVList() const override {
+        if (_kvList) return *_kvList;
+        else return _emptyKVList;
     }
 
     ~DataImpl() {
@@ -54,8 +54,8 @@ public:
             }
         }
 
-        if (_map) {
-            for (auto && kv : *_map) {
+        if (_kvList) {
+            for (auto && kv : *_kvList) {
                 delete get<1>(kv);
             }
         }
@@ -260,11 +260,11 @@ public:
                     auto key = (DataImpl *)alist->_list->back();
                     alist->_list->pop_back();
 
-                    if (!alist->_map) {
-                        alist->_map = new map<string, const IData *>();
+                    if (!alist->_kvList) {
+                        alist->_kvList = new list<pair<string, const IData *>>();
                     }
 
-                    (*alist->_map)[key->GetString()] = value;
+                    alist->_kvList->push_back(make_pair(key->GetString(), value));
                     _stateStack.back() = STATE_ALIST;
                     break;
                 }
@@ -495,7 +495,7 @@ void alist::Dump(ostream & o, const IData * d) {
             else o << ',';
             Dump(o, ele);
         }
-        for (auto && kv : d->GetDict()) {
+        for (auto && kv : d->GetKVList()) {
             if (first) first = false;
             else o << ',';
             o << get<0>(kv) << "=";

@@ -3,8 +3,8 @@
 
 #include <string>
 #include <list>
-#include <map>
 #include <iostream>
+#include <utility>
 #include <stdexcept>
 
 namespace alist {
@@ -20,7 +20,7 @@ namespace alist {
         virtual Type GetType() const = 0;
         virtual const std::string & GetString() const = 0;
         virtual const std::list<const IData *> & GetList() const = 0;
-        virtual const std::map<std::string, const IData *> & GetDict() const = 0;
+        virtual const std::list<std::pair<std::string, const IData *>> & GetKVList() const = 0;
         virtual ~IData() = default;
     };
 
