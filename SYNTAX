@@ -1,3 +1,5 @@
 Element = String | AList
-AList = "[" {[,] Element | String = Element} "]"
+AList = "[" {[,] Element | String "=" Element} "]"
 String = Literal | QuotedString | MultiLineString
+QuotedString = '"' {RegularChar | "'" | EscapeSequence} '"'
+             | "'" {RegularChar | '"' | EscapeSequence} "'"
