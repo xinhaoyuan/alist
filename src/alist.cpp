@@ -88,11 +88,13 @@ struct CharMap {
 };
 
 static const CharMap<bool> SPECIAL_CHARS(" \t[]='\",#", false, true);
+static const CharMap<bool> SEPARATOR_CHARS(" \t", false, true);
 static const CharMap<int> HEX_TRANSLATE("0123456789abcdefABCDEF", -1,
     {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 10, 11, 12, 13, 14, 15}
 );
 
 #define IS_SPECIAL_CHAR(c) (SPECIAL_CHARS.m[c])
+#define IS_SEPARATOR_CHAR(c) (SEPARATOR_CHARS.m[c])
 #define BUF_CLEAN_THRESHOLD 4096
 
 class AListParser : public IParser {
@@ -194,7 +196,6 @@ public:
         InputError:
             throw ParseException("Expect 2 hex chars for utf-8 escape");
         }
-        case '/':
         case '\\':
         case '"':
         case '\'':
@@ -337,7 +338,7 @@ public:
             case STATE_ALIST:
             case STATE_ALIST_WITH_KEY: {
                 size_t s = _readPos;
-                while (s < limit && (_buf[s] == ' ' || _buf[s] == '\t')) ++s;
+                while (s < limit && IS_SEPARATOR_CHAR(_buf[s])) ++s;
 
                 if (s >= limit) {
                     _readPos = limit;
@@ -379,7 +380,7 @@ public:
             }
             case STATE_ELEMENT_START: {
                 size_t s = _readPos;
-                while (s < limit && (_buf[s] == ' ' || _buf[s] == '\t')) ++s;
+                while (s < limit && IS_SEPARATOR_CHAR(_buf[s])) ++s;
 
                 if (s >= limit) {
                     _readPos = limit;
