@@ -344,8 +344,13 @@ public:
                     _readPos = limit;
                 }
                 else if (_buf[s] == ']') {
-                    _stateStack.back() = STATE_ELEMENT_END;
-                    _readPos = s + 1;
+                    if (state == STATE_ALIST) {
+                        _stateStack.back() = STATE_ELEMENT_END;
+                        _readPos = s + 1;
+                    }
+                    else {
+                        throw ParseException("premature alist end after '='");
+                    }
                 }
                 else if (_buf[s] == ',') {
                     _readPos = s + 1;
