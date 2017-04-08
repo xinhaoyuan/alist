@@ -173,16 +173,11 @@ class AListParser:
                 current = self.value_get()
 
                 if state == self.STATE_ALIST:
-                    if current.l is not None and current.v is not None:
-                        current.l.append(current.v)
-                    else:
-                        current.l = []
-                    current.v = value
+                    current.append(value)
                 elif state == self.STATE_ALIST_WITH_KEY:
-                    if current.m is None:
-                        current.m = {}
-                    current.m[current.v] = value
-                    current.v = None
+                    key = current.pop()
+                    current.append({ "key" : key, "value" : value })
+                    state = self.STATE_ALIST
                 else:
                     raise ParseException("invalid position to insert element")
 
@@ -267,17 +262,12 @@ class AListParser:
                 if not m:
                     read_pos = len(self.buf)
                 elif self.buf[m.start(0)] == "]":
-                    if current.v is not None:
-                        if current.l is None:
-                            current.l = []
-                        current.l.append(current.v)
-                        current.v = None
                     state = self.STATE_ELEMENT_END
                     read_pos = m.start(0) + 1
                 elif self.buf[m.start(0)] == "=":
-                    if current.v is None:
+                    if len(current) == 0:
                         raise ParseException("missing key")
-                    elif not isinstance(current.v, str):
+                    elif not isinstance(current[-1], str):
                         raise ParseException("key is not a string")
                     else:
                         state = self.STATE_ALIST_WITH_KEY
@@ -313,10 +303,7 @@ class AListParser:
                 if not m:
                     read_pos = len(self.buf)
                 elif self.buf[m.start(0)] == "[":
-                    current = object()
-                    current.l = None
-                    current.m = None
-                    current.v = None
+                    current = []
                     state = self.STATE_ALIST
                     read_pos = m.start(0) + 1
                 elif self.buf[m.start(0)] == "'":

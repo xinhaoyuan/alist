@@ -1,4 +1,4 @@
-from .simpleon import AListParser
+from .alist import AListParser
 from .parse_file import parse_file
 
 import sys, json
