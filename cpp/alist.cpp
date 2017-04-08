@@ -335,8 +335,7 @@ public:
                 }
                 break;
             }
-            case STATE_ALIST:
-            case STATE_ALIST_WITH_KEY: {
+            case STATE_ALIST: {
                 size_t s = _readPos;
                 while (s < limit && IS_SEPARATOR_CHAR(_buf[s])) ++s;
 
@@ -344,37 +343,51 @@ public:
                     _readPos = limit;
                 }
                 else if (_buf[s] == ']') {
-                    if (state == STATE_ALIST) {
-                        _stateStack.back() = STATE_ELEMENT_END;
-                        _readPos = s + 1;
-                    }
-                    else {
-                        throw ParseException("premature alist end after '='");
-                    }
+                    _stateStack.back() = STATE_ELEMENT_END;
+                    _readPos = s + 1;
                 }
                 else if (_buf[s] == ',') {
                     _readPos = s + 1;
                     _stateStack.push_back(STATE_ELEMENT_START);
                 }
+                else if (_buf[s] == '=') {
+                    auto alist = (DataImpl*)_valueStack.back();
+                    if (!alist->_list || alist->_list->size() == 0) {
+                        throw ParseException("missing key element before '='");
+                    }
+                    else if (alist->_list->front()->GetType() != IData::T_LITERAL
+                             && alist->_list->front()->GetType() != IData::T_STRING) {
+                        throw ParseException("key element must be literal or string");
+                    }
+                    _readPos = s + 1;
+                    _stateStack.back() = STATE_ALIST_WITH_KEY;
+                }
                 else if (_buf[s] == '#') {
                     _readPos = limit;
                 }
+                else {
+                    _readPos = s;
+                    _stateStack.push_back(STATE_ELEMENT_START);
+                }
+
+                break;
+
+            }
+            case STATE_ALIST_WITH_KEY: {
+                size_t s = _readPos;
+                while (s < limit && IS_SEPARATOR_CHAR(_buf[s])) ++s;
+
+                if (s >= limit) {
+                    _readPos = limit;
+                }
+                else if (_buf[s] == ']' || _buf[s] == ',') {
+                    throw ParseException("premature alist end after '='");
+                }
                 else if (_buf[s] == '=') {
-                    if (state == STATE_ALIST) {
-                        auto alist = (DataImpl*)_valueStack.back();
-                        if (!alist->_list || alist->_list->size() == 0) {
-                            throw ParseException("missing key element before '='");
-                        }
-                        else if (alist->_list->front()->GetType() != IData::T_LITERAL
-                                 && alist->_list->front()->GetType() != IData::T_STRING) {
-                            throw ParseException("key element must be literal or string");
-                        }
-                        _readPos = s + 1;
-                        _stateStack.back() = STATE_ALIST_WITH_KEY;
-                    }
-                    else {
-                        throw ParseException("unexpected '='");
-                    }
+                    throw ParseException("unexpected '='");
+                }
+                else if (_buf[s] == '#') {
+                    _readPos = limit;
                 }
                 else {
                     _readPos = s;
