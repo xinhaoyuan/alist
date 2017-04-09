@@ -5,56 +5,133 @@ from collections import deque
 class ParseException(Exception):
     pass
 
+class IAListOperator:
+    def __init__(self):
+        pass
+
+    def new_alist(self):
+        raise Exception("Not implemented")
+
+    def new_string(self):
+        raise Exception("Not implemented")
+
+    def new_literal(self, s):
+        raise Exception("Not implemented")
+
+    def append_string(self, o, s):
+        raise Exception("Not implemented")
+
+    def append_item(self, o, i):
+        raise Exception("Not implemented")
+
+    def append_kv(self, o, k, is_literal, v):
+        raise Exception("Not implemented")
+
+    def finalize_alist(self, o):
+        raise Exception("Not implemented")
+
+    def finalize_string(self, o):
+        raise Exception("Not implemented")
+
+class AListOperator(IAListOperator):
+    def new_alist(self):
+        return { "l" : [], "m" : {} }
+
+    def new_string(self):
+        return bytearray()
+
+    def new_literal(self, s):
+        return s
+
+    def append_string_bytearray(self, o, ba):
+        o.extend(ba)
+        return o
+
+    def append_string_byte(self, o, b):
+        o.append(b)
+        return o
+
+    def append_item(self, o, i):
+        o["l"].append(i)
+        return o
+
+    def append_kv(self, o, k, is_literal, v):
+        o["m"][k] = v
+        return o
+
+    def finalize_alist(self, o):
+        if len(o["l"]) == 0:
+            return o["m"]
+        elif len(o["m"]) == 0:
+            return o["l"]
+        else:
+            o["l"].append(o["m"])
+            return o["l"]
+
+    def finalize_string(self, o):
+        return o.decode("utf-8")
+
+class AListInternalValue:
+    def __init__(self):
+        self.has_tmp = False
+        self.tmp = None
+        self.o = None
+        self.is_string = False
+        self.is_literal = False
+
+    def __repr__(self):
+        return "[{0}|{1}]".format(self.o, self.tmp)
+
 class AListParser:
 
     STATE_ELEMENT_START    = 0
     STATE_ELEMENT_END      = 1
     STATE_ALIST            = 2
     STATE_ALIST_WITH_KEY   = 3
-    STATE_SQ_STRING        = 4
-    STATE_DQ_STRING        = 5
-    STATE_SML_STRING       = 6
-    STATE_DML_STRING       = 7
+    STATE_QUOTED_STRING    = 4
+    STATE_MULTILINE_STRING = 5
 
     # STATE_ELEMENT_START    = "ES"
     # STATE_ELEMENT_END      = "EE"
     # STATE_ALIST            = "AL"
-    # STATE_ALIST_WITH_KEY   = "ALK"
-    # STATE_SQ_STRING        = "SQ"
-    # STATE_DQ_STRING        = "DQ"
-    # STATE_SML_STRING       = "SML"
-    # STATE_DML_STRING       = "DML"
-
-    COMMENT_CHAR_RE = re.compile(r'#')
-    SQ_STRING_SPECIAL_RE = re.compile(r'[\\\']')
-    DQ_STRING_SPECIAL_RE = re.compile(r'[\\"]')
-    SML_STRING_SPECIAL_RE = re.compile(r'\\|\'\'\'')
-    DML_STRING_SPECIAL_RE = re.compile(r'\\|"""')
-    UNQUOTED_RE = re.compile(r'[^\[\]="\', \t#]+')
-    KEY_VALUE_SEP_RE = re.compile("=")
-    ITEM_SEP_RE = re.compile(",")
-    NON_WHITESPACE_RE = re.compile(r'[^ \t]')
+    # STATE_ALIST_WITH_KEY   = "AK"
+    # STATE_QUOTED_STRING    = "QS"
+    # STATE_MULTILINE_STRING = "MS"
 
     BUF_CLEAN_SIZE = 4096
 
     def __init__(self, multi = True):
-        self.reset(multi)
+        self.reset(multi,
+                   AListOperator(),
+                   "#", ",", ":=", "'\"", "[{", "]}")
 
-    def reset(self, multi = True):
+    def reset(self, multi, op,
+              c_line_comment, c_item_sep, c_kv_sep, c_quote, c_open, c_close):
         self.sealed = False
         self.multi = multi
-        self.state_stack = [ self.STATE_ELEMENT_START ];
-        self.value_stack = [ None ];
+        self.state_stack = [ self.STATE_ELEMENT_START ]
+        self.s_aux_stack = [ None ]
+        self.value_stack = [ None ]
         self.buf = ""
         self.buf_read_pos = 0
         self.values = deque()
+        self.op = op
+        self.c_line_comment = c_line_comment
+        self.c_item_sep = c_item_sep
+        self.c_kv_sep = c_kv_sep
+        self.c_quote = c_quote
+        self.c_open = c_open
+        self.c_close = c_close
+        self.re_literal = re.compile("[^ \t\\\\{0}]+".format(re.escape(
+            c_line_comment + c_item_sep + c_kv_sep + c_quote + c_open + c_close)))
 
     def seal(self):
         if self.sealed:
             return
         self.sealed = True
-        self.state_stack = [ ];
-        self.value_stack = [ ];
+        self.state_stack = [ ]
+        self.s_aux_stack = [ ]
+        self.value_stack = [ ]
         self.buf = ""
 
     def state_get(self):
@@ -66,6 +143,16 @@ class AListParser:
         if len(self.state_stack) == 0:
             raise ParseException("stack is empty")
         self.state_stack[len(self.state_stack) - 1] = state
+
+    def aux_get(self):
+        if len(self.s_aux_stack) == 0:
+            raise ParseException("stack is empty")
+        return self.s_aux_stack[len(self.s_aux_stack) - 1]
+
+    def aux_set(self, aux):
+        if len(self.s_aux_stack) == 0:
+            raise ParseException("stack is empty")
+        self.s_aux_stack[len(self.s_aux_stack) - 1] = aux
 
     def value_get(self):
         if len(self.value_stack) == 0:
@@ -81,10 +168,12 @@ class AListParser:
         if len(self.state_stack) == 0:
             raise ParseException("stack is empty")
         self.state_stack.pop()
+        self.s_aux_stack.pop()
         self.value_stack.pop()
 
-    def push(self, state, value):
+    def push(self, state, aux, value):
         self.state_stack.append(state)
+        self.s_aux_stack.append(aux)
         self.value_stack.append(value)
 
     def parse(self, s):
@@ -104,17 +193,18 @@ class AListParser:
 
     def handle_escape(self):
         start_c = self.buf[self.buf_read_pos]
+        value = self.value_get()
         if start_c == 'n':
-            self.value_get().extend(b'\n')
+            value.o = self.op.append_string_byte(value.o, ord('\n'))
             self.buf_read_pos += 1
         elif start_c == 't':
-            self.value_get().extend(b'\t')
+            value.o = self.op.append_string_byte(value.o, ord('\t'))
             self.buf_read_pos += 1
         elif start_c == 'b':
-            self.value_get().extend(b'\b')
+            value.o = self.op.append_string_byte(value.o, ord('\b'))
             self.buf_read_pos += 1
         elif start_c == 'f':
-            self.value_get().extend(b'\f')
+            value.o = self.op.append_string_byte(value.o, ord('\f'))
             self.buf_read_pos += 1
         elif start_c == 'x':
             if self.buf_read_pos + 2 >= len(self.buf):
@@ -123,15 +213,14 @@ class AListParser:
             try:
                 code = int(code_str, 16)
             except Exception:
-                raise ParseException("expect 2 hex chars for utf-8 escaping (parse {0} failed)".format(code_str))
-            self.value_get().append(code)
+                raise ParseException(
+                    "expect 2 hex chars for utf-8 escaping (parse {0} failed)"
+                    .format(code_str))
+            value.o = self.op.append_string_byte(value.o, code)
             self.buf_read_pos += 3
-        elif start_c == '"' or start_c == "'" or start_c == '\\':
-            self.value_get().append(ord(start_c))
-            self.buf_read_pos += 1
         else:
-            self.value_get().extend(b"\\")
-            self.value_get().append(ord(start_c))
+            value.o = self.op.append_string_byte(value.o, ord(start_c))
+            self.buf_read_pos += 1
 
     def clean_buf(self):
         if self.buf_read_pos > len(self.buf):
@@ -165,7 +254,7 @@ class AListParser:
                     self.values.append(value)
 
                     if self.multi:
-                        self.push(self.STATE_ELEMENT_START, None)
+                        self.push(self.STATE_ELEMENT_START, None, None)
 
                     continue
 
@@ -173,173 +262,170 @@ class AListParser:
                 current = self.value_get()
 
                 if state == self.STATE_ALIST:
-                    current.append(value)
+                    if current.has_tmp:
+                        current.o = self.op.append_item(current.o, current.tmp)
+                    current.has_tmp = True
+                    current.tmp = value.o
+                    current.is_string = value.is_string
+                    current.is_literal = value.is_literal
                 elif state == self.STATE_ALIST_WITH_KEY:
-                    key = current.pop()
-                    current.append({ "key" : key, "value" : value })
+                    current.o = self.op.append_kv(
+                        current.o, current.tmp, current.is_literal, value.o)
+                    current.has_tmp = False
+                    current.tmp = None
+                    current.is_string = False
+                    current.is_literal = False
                     state = self.STATE_ALIST
                 else:
                     raise ParseException("invalid position to insert element")
 
-            elif state == self.STATE_SQ_STRING:
-                m = self.SQ_STRING_SPECIAL_RE.search(self.buf, read_pos)
-                if not m:
-                    current.extend(self.buf[read_pos:].encode("utf-8"))
+            elif state == self.STATE_QUOTED_STRING:
+                p = read_pos
+                q = self.c_quote[self.aux_get()]
+                while p < len(self.buf) and self.buf[p] != "\\" and self.buf[p] != q:
+                    p = p + 1
+
+                if p >= len(self.buf):
+                    current.o = self.op.append_string_bytearray(
+                        current.o, self.buf[read_pos:].encode("utf-8"))
+                    current.o = self.op.finalize_string(current.o)
                     state = self.STATE_ELEMENT_END
                     read_pos = len(self.buf)
                 else:
-                    current.extend(self.buf[read_pos:m.start(0)].encode("utf-8"))
-                    if self.buf[m.start(0)] == "\\":
-                        self.buf_read_pos = m.start(0) + 1
+                    current.o = self.op.append_string_bytearray(
+                        current.o, self.buf[read_pos:p].encode("utf-8"))
+                    if self.buf[p] == "\\":
+                        self.buf_read_pos = p + 1
                         self.handle_escape()
                         continue
-                    elif self.buf[m.start(0)] == "'":
-                        # the string is ended
-                        read_pos = m.start(0) + 1
+                    elif self.buf[p] == q:
+                        current.o = self.op.finalize_string(current.o)
+                        read_pos = p + 1
                         state = self.STATE_ELEMENT_END
                     else:
                         raise ParseException("format error in quoted string")
 
-            elif state == self.STATE_DQ_STRING:
-                m = self.DQ_STRING_SPECIAL_RE.search(self.buf, read_pos)
-                if not m:
-                    current.extend(self.buf[read_pos:].encode("utf-8"))
-                    state = self.STATE_ELEMENT_END
-                    read_pos = len(self.buf)
-                else:
-                    current.extend(self.buf[read_pos:m.start(0)].encode("utf-8"))
-                    if self.buf[m.start(0)] == "\\":
-                        self.buf_read_pos = m.start(0) + 1
-                        self.handle_escape()
-                        continue
-                    elif self.buf[m.start(0)] == '"':
-                        # the string is ended
-                        read_pos = m.start(0) + 1
-                        state = self.STATE_ELEMENT_END
-                    else:
-                        raise ParseException("format error in quoted string")
+            elif state == self.STATE_MULTILINE_STRING:
+                p = read_pos
+                q = self.c_quote[self.aux_get()]
+                while p < len(self.buf) and self.buf[p] != "\\" and self.buf[p] != q:
+                    p = p + 1
 
-            elif state == self.STATE_SML_STRING:
-                m = self.SML_STRING_SPECIAL_RE.search(self.buf, read_pos)
-                if not m:
-                    current.extend(self.buf[read_pos:].encode("utf-8"))
-                    current.extend(b"\n")
+                if p >= len(self.buf):
+                    current.o = self.op.append_string_bytearray(
+                        current.o, self.buf[read_pos:].encode("utf-8"))
+                    current.o = self.op.append_string_byte(current.o, ord("\n"))
                     read_pos = len(self.buf)
                 else:
-                    current.extend(self.buf[read_pos:m.start(0)].encode("utf-8"))
-                    if self.buf[m.start(0)] == "\\":
-                        self.buf_read_pos = m.start(0) + 1
+                    current.o = self.op.append_string_bytearray(
+                        current.o, self.buf[read_pos:p].encode("utf-8"))
+                    if self.buf[p] == "\\":
+                        self.buf_read_pos = p + 1
                         self.handle_escape()
                         continue
-                    elif self.buf[m.start(0):m.start(0) + 3] == "'''":
-                        # the string is ended
-                        read_pos = m.start(0) + 3
-                        state = self.STATE_ELEMENT_END
-                    else:
-                        raise ParseException("format error in multi-line string")
-
-            elif state == self.STATE_DML_STRING:
-                m = self.DML_STRING_SPECIAL_RE.search(self.buf, read_pos)
-                if not m:
-                    current.extend(self.buf[read_pos:].encode("utf-8"))
-                    current.extend(b"\n")
-                    read_pos = len(self.buf)
-                else:
-                    current.extend(self.buf[read_pos:m.start(0)].encode("utf-8"))
-                    if self.buf[m.start(0)] == "\\":
-                        self.buf_read_pos = m.start(0) + 1
-                        self.handle_escape()
-                        continue
-                    elif self.buf[m.start(0):m.start(0) + 3] == '"""':
-                        # the string is ended
-                        read_pos = m.start(0) + 3
+                    elif self.buf[p] == q and self.buf[p + 1] == q and self.buf[p + 2] == q:
+                        current.o = self.op.finalize_string(current.o)
+                        read_pos = p + 3
                         state = self.STATE_ELEMENT_END
                     else:
                         raise ParseException("format error in multi-line string")
 
             elif state == self.STATE_ALIST:
-                m = self.NON_WHITESPACE_RE.search(self.buf, read_pos)
-                if not m:
+                p = read_pos
+                q = self.c_close[self.aux_get()]
+                while p < len(self.buf) and (self.buf[p] == " " or self.buf[p] == "\t"):
+                    p = p + 1
+
+                if p >= len(self.buf):
                     read_pos = len(self.buf)
-                elif self.buf[m.start(0)] == "]":
+                elif self.buf[p] == q:
+                    if current.has_tmp:
+                        current.has_tmp = False
+                        current.o = self.op.append_item(current.o, current.tmp)
+                        current.tmp = None
+                        current.is_string = False
+                        current.is_literal = False
+                    current.o = self.op.finalize_alist(current.o)
                     state = self.STATE_ELEMENT_END
-                    read_pos = m.start(0) + 1
-                elif self.buf[m.start(0)] == "=":
-                    if len(current) == 0:
+                    read_pos = p + 1
+                elif self.buf[p] in self.c_kv_sep:
+                    if not current.has_tmp:
                         raise ParseException("missing key")
-                    elif not isinstance(current[-1], str):
+                    elif not current.is_string and not current.is_literal:
                         raise ParseException("key is not a string")
                     else:
                         state = self.STATE_ALIST_WITH_KEY
-                        read_pos = m.start(0) + 1
-                elif self.ITEM_SEP_RE.match(self.buf[m.start(0)]):
-                    self.buf_read_pos = m.start(0) + 1
-                    self.push(self.STATE_ELEMENT_START, None)
+                        read_pos = p + 1
+                elif self.buf[p] in self.c_item_sep:
+                    self.buf_read_pos = p + 1
+                    self.push(self.STATE_ELEMENT_START, None, None)
                     continue
-                elif self.buf[m.start(0)] == "#":
+                elif self.buf[p] in self.c_line_comment:
                     read_pos = len(self.buf)
                 else:
-                    self.buf_read_pos = m.start(0)
-                    self.push(self.STATE_ELEMENT_START, None)
+                    self.buf_read_pos = p
+                    self.push(self.STATE_ELEMENT_START, None, None)
                     continue
 
             elif state == self.STATE_ALIST_WITH_KEY:
-                m = self.NON_WHITESPACE_RE.search(self.buf, read_pos)
-                if not m:
+                p = read_pos
+                while p < len(self.buf) and (self.buf[p] == " " or self.buf[p] == "\t"):
+                    p = p + 1
+
+                if p >= len(self.buf):
                     read_pos = len(self.buf)
-                elif self.buf[m.start(0)] == "]" or self.buf[m.start(0)] == ",":
-                    raise ParseException("premature alist end after '='")
-                elif self.buf[m.start(0)] == "=":
-                    raise ParseException("unexpected '='")
-                elif self.buf[m.start(0)] == "#":
+                elif self.buf[p] in self.c_line_comment:
                     read_pos = len(self.buf)
                 else:
-                    self.buf_read_pos = m.start(0)
-                    self.push(self.STATE_ELEMENT_START, None)
+                    self.buf_read_pos = p
+                    self.push(self.STATE_ELEMENT_START, None, None)
                     continue
 
             elif state == self.STATE_ELEMENT_START:
-                m = self.NON_WHITESPACE_RE.search(self.buf, read_pos)
-                if not m:
+                p = read_pos
+                while p < len(self.buf) and (self.buf[p] == " " or self.buf[p] == "\t"):
+                    p = p + 1
+
+                if p >= len(self.buf):
                     read_pos = len(self.buf)
-                elif self.buf[m.start(0)] == "[":
-                    current = []
+                elif self.buf[p] in self.c_open:
+                    current = AListInternalValue()
+                    current.has_tmp = False
+                    current.o = self.op.new_alist()
                     state = self.STATE_ALIST
-                    read_pos = m.start(0) + 1
-                elif self.buf[m.start(0)] == "'":
-                    current = bytearray()
-                    if self.buf[m.start(0):m.start(0) + 3] == "'''":
-                        state = self.STATE_SML_STRING
-                        read_pos = m.start(0) + 3
+                    self.aux_set(self.c_open.find(self.buf[p]))
+                    read_pos = p + 1
+                elif self.buf[p] in self.c_quote:
+                    current = AListInternalValue()
+                    current.has_tmp = False
+                    current.tmp = None
+                    current.o = self.op.new_string()
+                    current.is_string = True
+                    current.is_literal = False
+                    self.aux_set(self.c_quote.find(self.buf[p]))
+
+                    if self.buf[p + 1] == self.buf[p] and self.buf[p + 2] == self.buf[p]:
+                        state = self.STATE_MULTILINE_STRING
+                        read_pos = p + 3
                     else:
-                        state = self.STATE_SQ_STRING
-                        read_pos = m.start(0) + 1
-                elif self.buf[m.start(0)] == '"':
-                    current = bytearray()
-                    if self.buf[m.start(0):m.start(0) + 3] == '"""':
-                        state = self.STATE_DML_STRING
-                        read_pos = m.start(0) + 3
-                    else:
-                        state = self.STATE_DQ_STRING
-                        read_pos = m.start(0) + 1
-                elif self.buf[m.start(0)] == "#":
+                        state = self.STATE_QUOTED_STRING
+                        read_pos = p + 1
+                elif self.buf[p] in self.c_line_comment:
                     read_pos = len(self.buf)
-                elif self.UNQUOTED_RE.match(self.buf[m.start(0)]):
-                    m_end = self.UNQUOTED_RE.search(self.buf, m.start(0))
-                    if not m_end:
-                        current = self.buf[m.start(0):]
-                        state = self.STATE_ELEMENT_END
-                        read_pos = len(self.buf)
-                    else:
-                        current = self.buf[m_end.start(0):m_end.end(0)]
-                        state = self.STATE_ELEMENT_END
-                        read_pos = m_end.end(0)
-
-                    if len(current) == 0:
-                        raise ParseException("unexpect char at element start")
-
                 else:
-                    raise ParseException("format error in parsing general element")
+                    current = AListInternalValue()
+                    current.has_tmp = False
+                    current.tmp = None
+                    current.is_string = False
+                    current.is_literal = True
+
+                    m = self.re_literal.match(self.buf, p)
+                    if not m or m.end(0) == p:
+                        raise ParseException("format error in parsing general element")
+                    else:
+                        current.o = self.op.new_literal(self.buf[p:m.end(0)])
+                        state = self.STATE_ELEMENT_END
+                        read_pos = m.end(0)
 
             self.state_set(state)
             self.value_set(current)
@@ -351,4 +437,4 @@ class AListParser:
         if len(self.values) == 0:
             return None
         else:
-            return self.values.popleft()
+            return self.values.popleft().o
