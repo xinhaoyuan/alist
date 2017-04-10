@@ -332,12 +332,15 @@ class AListParser:
                         self.buf_read_pos = p + 1
                         self.handle_escape()
                         continue
-                    elif self.buf[p] == q and self.buf[p + 1] == q and self.buf[p + 2] == q:
+                    elif p + 2 < len(self.buf) and \
+                         self.buf[p] == q and self.buf[p + 1] == q and self.buf[p + 2] == q:
                         current.o = self.op.string_finalize(current.o)
                         read_pos = p + 3
                         state = self.STATE_ELEMENT_END
                     else:
-                        raise ParseException("format error in multi-line string")
+                        current.o = self.op.string_append_bytearray(
+                            current.o, self.buf[p].encode("utf-8"))
+                        read_pos = p + 1
 
             elif state == self.STATE_ALIST:
                 p = read_pos

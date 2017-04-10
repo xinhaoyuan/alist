@@ -2,7 +2,7 @@
   foo = "hello world # will be included
   # this is a comment line
   multi-line = """
-  this is a multi-line string
+  this is a multi-line "string"
   # this is not a comment line
   and line 2
   """
