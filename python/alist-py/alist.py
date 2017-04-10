@@ -9,57 +9,47 @@ class IAListOperator:
     def __init__(self):
         pass
 
-    def new_alist(self):
+    def alist_new(self):
         raise Exception("Not implemented")
 
-    def new_string(self):
+    def alist_append_item(self, o, i):
         raise Exception("Not implemented")
 
-    def new_literal(self, s):
+    def alist_append_kv(self, o, k, is_literal, v):
         raise Exception("Not implemented")
 
-    def append_string(self, o, s):
+    def alist_finalize(self, o):
         raise Exception("Not implemented")
 
-    def append_item(self, o, i):
+    def string_new(self):
         raise Exception("Not implemented")
 
-    def append_kv(self, o, k, is_literal, v):
+    def string_append_bytearray(self, o, ba):
         raise Exception("Not implemented")
 
-    def finalize_alist(self, o):
+    def string_append_byte(self, o, b):
         raise Exception("Not implemented")
 
-    def finalize_string(self, o):
+    def string_finalize(self, o):
         raise Exception("Not implemented")
+
+    def literal_new(self, s):
+        raise Exception("Not implemented")
+
 
 class AListOperator(IAListOperator):
-    def new_alist(self):
+    def alist_new(self):
         return { "l" : [], "m" : {} }
 
-    def new_string(self):
-        return bytearray()
-
-    def new_literal(self, s):
-        return s
-
-    def append_string_bytearray(self, o, ba):
-        o.extend(ba)
-        return o
-
-    def append_string_byte(self, o, b):
-        o.append(b)
-        return o
-
-    def append_item(self, o, i):
+    def alist_append_item(self, o, i):
         o["l"].append(i)
         return o
 
-    def append_kv(self, o, k, is_literal, v):
+    def alist_append_kv(self, o, k, is_literal, v):
         o["m"][k] = v
         return o
 
-    def finalize_alist(self, o):
+    def alist_finalize(self, o):
         if len(o["l"]) == 0:
             return o["m"]
         elif len(o["m"]) == 0:
@@ -68,8 +58,22 @@ class AListOperator(IAListOperator):
             o["l"].append(o["m"])
             return o["l"]
 
-    def finalize_string(self, o):
+    def string_new(self):
+        return bytearray()
+
+    def string_append_bytearray(self, o, ba):
+        o.extend(ba)
+        return o
+
+    def string_append_byte(self, o, b):
+        o.append(b)
+        return o
+
+    def string_finalize(self, o):
         return o.decode("utf-8")
+
+    def literal_new(self, s):
+        return s
 
 class AListInternalValue:
     def __init__(self):
@@ -100,13 +104,15 @@ class AListParser:
 
     BUF_CLEAN_SIZE = 4096
 
-    def __init__(self, multi = True):
+    def __init__(self, op = None, multi = True):
         self.reset(multi,
-                   AListOperator(),
-                   "#", ",", ":=", "'\"", "[{", "]}")
+                   AListOperator() if op is None else op,
+                   " \t", "#", ",", ":=", "'\"", "[{", "]}")
 
     def reset(self, multi, op,
-              c_line_comment, c_item_sep, c_kv_sep, c_quote, c_open, c_close):
+              c_whitespace, c_line_comment,
+              c_item_sep, c_kv_sep,
+              c_quote, c_open, c_close):
         self.sealed = False
         self.multi = multi
         self.state_stack = [ self.STATE_ELEMENT_START ]
@@ -116,14 +122,17 @@ class AListParser:
         self.buf_read_pos = 0
         self.values = deque()
         self.op = op
+        self.c_whitespace = c_whitespace
         self.c_line_comment = c_line_comment
         self.c_item_sep = c_item_sep
         self.c_kv_sep = c_kv_sep
         self.c_quote = c_quote
         self.c_open = c_open
         self.c_close = c_close
-        self.re_literal = re.compile("[^ \t\\\\{0}]+".format(re.escape(
-            c_line_comment + c_item_sep + c_kv_sep + c_quote + c_open + c_close)))
+        self.re_literal = re.compile("[^\\\\{0}]+".format(re.escape(
+            c_whitespace + c_line_comment +
+            c_item_sep + c_kv_sep +
+            c_quote + c_open + c_close)))
 
     def seal(self):
         if self.sealed:
@@ -195,16 +204,16 @@ class AListParser:
         start_c = self.buf[self.buf_read_pos]
         value = self.value_get()
         if start_c == 'n':
-            value.o = self.op.append_string_byte(value.o, ord('\n'))
+            value.o = self.op.string_append_byte(value.o, ord('\n'))
             self.buf_read_pos += 1
         elif start_c == 't':
-            value.o = self.op.append_string_byte(value.o, ord('\t'))
+            value.o = self.op.string_append_byte(value.o, ord('\t'))
             self.buf_read_pos += 1
         elif start_c == 'b':
-            value.o = self.op.append_string_byte(value.o, ord('\b'))
+            value.o = self.op.string_append_byte(value.o, ord('\b'))
             self.buf_read_pos += 1
         elif start_c == 'f':
-            value.o = self.op.append_string_byte(value.o, ord('\f'))
+            value.o = self.op.string_append_byte(value.o, ord('\f'))
             self.buf_read_pos += 1
         elif start_c == 'x':
             if self.buf_read_pos + 2 >= len(self.buf):
@@ -216,10 +225,10 @@ class AListParser:
                 raise ParseException(
                     "expect 2 hex chars for utf-8 escaping (parse {0} failed)"
                     .format(code_str))
-            value.o = self.op.append_string_byte(value.o, code)
+            value.o = self.op.string_append_byte(value.o, code)
             self.buf_read_pos += 3
         else:
-            value.o = self.op.append_string_byte(value.o, ord(start_c))
+            value.o = self.op.string_append_byte(value.o, ord(start_c))
             self.buf_read_pos += 1
 
     def clean_buf(self):
@@ -263,13 +272,13 @@ class AListParser:
 
                 if state == self.STATE_ALIST:
                     if current.has_tmp:
-                        current.o = self.op.append_item(current.o, current.tmp)
+                        current.o = self.op.alist_append_item(current.o, current.tmp)
                     current.has_tmp = True
                     current.tmp = value.o
                     current.is_string = value.is_string
                     current.is_literal = value.is_literal
                 elif state == self.STATE_ALIST_WITH_KEY:
-                    current.o = self.op.append_kv(
+                    current.o = self.op.alist_append_kv(
                         current.o, current.tmp, current.is_literal, value.o)
                     current.has_tmp = False
                     current.tmp = None
@@ -286,20 +295,20 @@ class AListParser:
                     p = p + 1
 
                 if p >= len(self.buf):
-                    current.o = self.op.append_string_bytearray(
+                    current.o = self.op.string_append_bytearray(
                         current.o, self.buf[read_pos:].encode("utf-8"))
-                    current.o = self.op.finalize_string(current.o)
+                    current.o = self.op.string_finalize(current.o)
                     state = self.STATE_ELEMENT_END
                     read_pos = len(self.buf)
                 else:
-                    current.o = self.op.append_string_bytearray(
+                    current.o = self.op.string_append_bytearray(
                         current.o, self.buf[read_pos:p].encode("utf-8"))
                     if self.buf[p] == "\\":
                         self.buf_read_pos = p + 1
                         self.handle_escape()
                         continue
                     elif self.buf[p] == q:
-                        current.o = self.op.finalize_string(current.o)
+                        current.o = self.op.string_finalize(current.o)
                         read_pos = p + 1
                         state = self.STATE_ELEMENT_END
                     else:
@@ -312,19 +321,19 @@ class AListParser:
                     p = p + 1
 
                 if p >= len(self.buf):
-                    current.o = self.op.append_string_bytearray(
+                    current.o = self.op.string_append_bytearray(
                         current.o, self.buf[read_pos:].encode("utf-8"))
-                    current.o = self.op.append_string_byte(current.o, ord("\n"))
+                    current.o = self.op.string_append_byte(current.o, ord("\n"))
                     read_pos = len(self.buf)
                 else:
-                    current.o = self.op.append_string_bytearray(
+                    current.o = self.op.string_append_bytearray(
                         current.o, self.buf[read_pos:p].encode("utf-8"))
                     if self.buf[p] == "\\":
                         self.buf_read_pos = p + 1
                         self.handle_escape()
                         continue
                     elif self.buf[p] == q and self.buf[p + 1] == q and self.buf[p + 2] == q:
-                        current.o = self.op.finalize_string(current.o)
+                        current.o = self.op.string_finalize(current.o)
                         read_pos = p + 3
                         state = self.STATE_ELEMENT_END
                     else:
@@ -333,7 +342,7 @@ class AListParser:
             elif state == self.STATE_ALIST:
                 p = read_pos
                 q = self.c_close[self.aux_get()]
-                while p < len(self.buf) and (self.buf[p] == " " or self.buf[p] == "\t"):
+                while p < len(self.buf) and self.buf[p] in self.c_whitespace:
                     p = p + 1
 
                 if p >= len(self.buf):
@@ -341,11 +350,11 @@ class AListParser:
                 elif self.buf[p] == q:
                     if current.has_tmp:
                         current.has_tmp = False
-                        current.o = self.op.append_item(current.o, current.tmp)
+                        current.o = self.op.alist_append_item(current.o, current.tmp)
                         current.tmp = None
                         current.is_string = False
                         current.is_literal = False
-                    current.o = self.op.finalize_alist(current.o)
+                    current.o = self.op.alist_finalize(current.o)
                     state = self.STATE_ELEMENT_END
                     read_pos = p + 1
                 elif self.buf[p] in self.c_kv_sep:
@@ -369,7 +378,7 @@ class AListParser:
 
             elif state == self.STATE_ALIST_WITH_KEY:
                 p = read_pos
-                while p < len(self.buf) and (self.buf[p] == " " or self.buf[p] == "\t"):
+                while p < len(self.buf) and self.buf[p] in self.c_whitespace:
                     p = p + 1
 
                 if p >= len(self.buf):
@@ -383,7 +392,7 @@ class AListParser:
 
             elif state == self.STATE_ELEMENT_START:
                 p = read_pos
-                while p < len(self.buf) and (self.buf[p] == " " or self.buf[p] == "\t"):
+                while p < len(self.buf) and self.buf[p] in self.c_whitespace:
                     p = p + 1
 
                 if p >= len(self.buf):
@@ -391,7 +400,7 @@ class AListParser:
                 elif self.buf[p] in self.c_open:
                     current = AListInternalValue()
                     current.has_tmp = False
-                    current.o = self.op.new_alist()
+                    current.o = self.op.alist_new()
                     state = self.STATE_ALIST
                     self.aux_set(self.c_open.find(self.buf[p]))
                     read_pos = p + 1
@@ -399,7 +408,7 @@ class AListParser:
                     current = AListInternalValue()
                     current.has_tmp = False
                     current.tmp = None
-                    current.o = self.op.new_string()
+                    current.o = self.op.string_new()
                     current.is_string = True
                     current.is_literal = False
                     self.aux_set(self.c_quote.find(self.buf[p]))
@@ -423,7 +432,7 @@ class AListParser:
                     if not m or m.end(0) == p:
                         raise ParseException("format error in parsing general element")
                     else:
-                        current.o = self.op.new_literal(self.buf[p:m.end(0)])
+                        current.o = self.op.literal_new(self.buf[p:m.end(0)])
                         state = self.STATE_ELEMENT_END
                         read_pos = m.end(0)
 
