@@ -416,7 +416,8 @@ class AListParser:
                     current.is_literal = False
                     self.aux_set(self.c_quote.find(self.buf[p]))
 
-                    if self.buf[p + 1] == self.buf[p] and self.buf[p + 2] == self.buf[p]:
+                    if p + 2 < len(self.buf) and \
+                       self.buf[p + 1] == self.buf[p] and self.buf[p + 2] == self.buf[p]:
                         state = self.STATE_MULTILINE_STRING
                         read_pos = p + 3
                     else:
