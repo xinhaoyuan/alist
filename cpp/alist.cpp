@@ -381,7 +381,7 @@ public:
                     v.hasTmp = false;
                     v.tmp = nullptr;
                     v.o = _op->StringNew();
-                    _auxStack.push_back(strchr(_c_open, _buf[s]) - _c_open);
+                    _auxStack.push_back(strchr(_c_quote, _buf[s]) - _c_quote);
 
                     if (s + 2 < limit &&
                         _buf[s + 1] == _buf[s] && _buf[s + 2] == _buf[s]) {
@@ -448,57 +448,3 @@ IParser * alist::CreateAListParser(IOperator * op, bool multi,
     return new AListParser(multi, op, c_whitespace, c_line_comment,
                            c_item_sep, c_kv_sep, c_quote, c_open, c_close);
 }
-
-// #if __cplusplus < 201402L
-// #include <sstream>
-// string quoted(const string & s) {
-//     ostringstream os;
-//     os << '"';
-//     for (int i = 0; i < s.size(); ++i) {
-//         if (32 <= s[i] && s[i] <= 126) {
-//             if (s[i] == '"' || s[i] == '\\')
-//                 os << '\\';
-//             os << s[i];
-//         }
-//         else os << '\\' << 'x' << "0123456789abcdef"[(unsigned char)s[i] >> 4] << "0123456789abcdef"[s[i] & 0xf];
-//     }
-//     os << '"';
-//     return os.str();
-// }
-// #endif
-
-// void alist::Dump(ostream & o, const IData * d) {
-//     if (d == nullptr) {
-//         o << "(NULL)";
-//         return;
-//     }
-
-//     switch (d->GetType()) {
-//     case IData::T_UNKNOWN:
-//         o << "(UNKNOWN)";
-//         break;
-//     case IData::T_LITERAL:
-//         o << d->GetString();
-//         break;
-//     case IData::T_STRING:
-//         o << quoted(d->GetString());
-//         break;
-//     case IData::T_ALIST: {
-//         o << '[';
-//         bool first = true;
-//         for (const IData * ele : d->GetList()) {
-//             if (first) first = false;
-//             else o << ',';
-//             Dump(o, ele);
-//         }
-//         for (auto && kv : d->GetKVList()) {
-//             if (first) first = false;
-//             else o << ',';
-//             o << get<0>(kv) << "=";
-//             Dump(o, get<1>(kv));
-//         }
-//         o << ']';
-//         break;
-//     }
-//     }
-// }
