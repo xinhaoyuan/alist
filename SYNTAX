@@ -1,6 +1,0 @@
-Element = String | AList
-AList = "[" {[,] Element | String "=" Element} "]"
-String = Literal | QuotedString | MultiLineString
-Literal = LiteralRegExp
-QuotedString = DoubleQuotedRegExp | SingleQuotedRegExp
-MultiLineString = DQMultiLineStringRegExp | SQMultiLineStringRegExp
