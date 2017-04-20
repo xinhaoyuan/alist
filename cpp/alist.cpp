@@ -8,6 +8,192 @@
 using namespace alist;
 using namespace std;
 
+const string _emptyString;
+const list<const IData *> _emptyList;
+const list<pair<string, const IData *>> _emptyKVList;
+
+class Data : public IData {
+private:
+    Type _type;
+    string * _str;
+    list<const IData *> * _list;
+    list<pair<string, const IData *>> * _kvList;
+
+    friend class ParseOperator;
+
+public:
+    Data()
+        : _type(T_UNKNOWN)
+        , _str(nullptr)
+        , _list(nullptr)
+        , _kvList(nullptr)
+        { }
+
+    Type GetType() const override {
+        return _type;
+    }
+
+    const string & GetString() const override {
+        if (_str) return *_str;
+        else return _emptyString;
+    }
+
+    const list<const IData *> & GetList() const override {
+        if (_list) return *_list;
+        else return _emptyList;
+    }
+
+    const list<pair<string, const IData *>> & GetKVList() const override {
+        if (_kvList) return *_kvList;
+        else return _emptyKVList;
+    }
+
+    ~Data() override {
+        delete _str;
+        if (_list) {
+            for (auto item : *_list) {
+                delete item;
+            }
+        }
+
+        if (_kvList) {
+            for (auto && kv : *_kvList) {
+                delete get<1>(kv);
+            }
+        }
+    }
+};
+
+class ParseOperator : public IOperator {
+public:
+    void * AListNew() {
+        auto ret = new Data();
+        ret->_type = Data::T_ALIST;
+        return ret;
+    }
+
+    void * AListAppendItem(void * _d, void * i) {
+        auto d = (Data *)_d;
+        if (d->_list == nullptr) {
+            d->_list = new list<const IData *>();
+        }
+        d->_list->push_back((Data *)i);
+        return d;
+    }
+
+    void * AListAppendKV(void * _d, void * _k, bool isLiteral, void * _v) {
+        auto d = (Data *)_d;
+        auto k = (Data *)_k;
+        auto v = (Data *)_v;
+        if (d->_kvList == nullptr) {
+            d->_kvList = new list<pair<string, const IData *>>();
+        }
+        d->_kvList->push_back(make_pair(k->GetString(), v));
+        return d;
+    }
+
+    void * AListFinalize(void * d) {
+        return d;
+    }
+
+    void * StringNew() {
+        auto ret = new Data();
+        ret->_type = Data::T_STRING;
+        return ret;
+    }
+
+    void * StringAppendByte(void * _d, unsigned char b) {
+        auto d = (Data *)_d;
+        if (d->_str == nullptr) {
+            d->_str = new string();
+        }
+
+        d->_str->push_back(b);
+        return d;
+    }
+
+    void * StringAppendByteArray(void * _d, const unsigned char * ba, int len) {
+        auto d = (Data *)_d;
+        if (d->_str == nullptr) {
+            d->_str = new string();
+        }
+
+        d->_str->append((const char *)ba, len);
+        return d;
+    }
+
+    void * StringFinalize(void * d) {
+        return d;
+    }
+
+    void * LiteralNew(const char * s, int len) {
+        auto ret = new Data();
+        ret->_type = Data::T_LITERAL;
+        ret->_str = new string(s, len);
+        return ret;
+    }
+
+    void * Free(void * _d) {
+        auto d = (Data *)_d;
+        delete d;
+    }
+};
+
+
+#if __cplusplus < 201402L
+#include <sstream>
+string quoted(const string & s) {
+    ostringstream os;
+    os << '"';
+    for (int i = 0; i < s.size(); ++i) {
+        if (32 <= s[i] && s[i] <= 126) {
+            if (s[i] == '"' || s[i] == '\\')
+                os << '\\';
+            os << s[i];
+        }
+        else os << '\\' << 'x' << "0123456789abcdef"[(unsigned char)s[i] >> 4] << "0123456789abcdef"[s[i] & 0xf];
+    }
+    os << '"';
+    return os.str();
+}
+#endif
+
+void alist::Dump(ostream & o, const IData * d) {
+    if (d == nullptr) {
+        o << "(NULL)";
+        return;
+    }
+
+    switch (d->GetType()) {
+    case IData::T_UNKNOWN:
+        o << "(UNKNOWN)";
+        break;
+    case IData::T_LITERAL:
+        o << d->GetString();
+        break;
+    case IData::T_STRING:
+        o << quoted(d->GetString());
+        break;
+    case IData::T_ALIST: {
+        o << '[';
+        bool first = true;
+        for (const IData * ele : d->GetList()) {
+            if (first) first = false;
+            else o << ',';
+            Dump(o, ele);
+        }
+        for (auto && kv : d->GetKVList()) {
+            if (first) first = false;
+            else o << ',';
+            o << get<0>(kv) << "=";
+            Dump(o, get<1>(kv));
+        }
+        o << ']';
+        break;
+    }
+    }
+}
+
 ParseException::ParseException(const char * w) : _what(w) { }
 const char * ParseException::what() const noexcept { return _what.c_str(); }
 
@@ -84,6 +270,8 @@ private:
     const char *    _c_close;
     CharMap<bool>   _c_special;
 
+    ParseOperator   _defaultOp;
+
 public:
 
     AListParser(bool multi, IOperator * op,
@@ -96,7 +284,7 @@ public:
         _sealed = false;
         _readPos = 0;
         _stateStack.push_back(STATE_ELEMENT_START);
-        _op = op;
+        _op = op == NULL ? &_defaultOp : op;
         _c_whitespace = c_whitespace;
         _c_line_comment = c_line_comment;
         _c_item_sep = c_item_sep;
@@ -437,14 +625,14 @@ public:
     }
 };
 
-IParser * alist::CreateAListParser(IOperator * op, bool multi,
-                                   const char * c_whitespace,
-                                   const char * c_line_comment,
-                                   const char * c_item_sep,
-                                   const char * c_kv_sep,
-                                   const char * c_quote,
-                                   const char * c_open,
-                                   const char * c_close) {
+IParser * alist::CreateParser(IOperator * op, bool multi,
+                              const char * c_whitespace,
+                              const char * c_line_comment,
+                              const char * c_item_sep,
+                              const char * c_kv_sep,
+                              const char * c_quote,
+                              const char * c_open,
+                              const char * c_close) {
     return new AListParser(multi, op, c_whitespace, c_line_comment,
                            c_item_sep, c_kv_sep, c_quote, c_open, c_close);
 }
