@@ -1,5 +1,4 @@
 #include "alist.hpp"
-#include <list>
 #include <string>
 #include <iostream>
 #include <utility>
