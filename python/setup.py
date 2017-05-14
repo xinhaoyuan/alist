@@ -1,7 +1,7 @@
 from distutils.core import setup
 
 setup(name = 'alist',
-      version ='0.1.0',
+      version ='0.1.1',
       description = "alist format decoder",
       author = "Xinhao Yuan",
       author_email = "xinhaoyuan@gmail.com",
